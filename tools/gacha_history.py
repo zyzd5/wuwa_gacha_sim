@@ -33,8 +33,7 @@ import math
 import sys
 import urllib.error
 import urllib.request
-from collections import Counter, defaultdict
-from urllib.parse import parse_qs, urlparse
+from collections import Counter
 
 # 请求里 cardPoolType 的枚举范围。URL 里的 gacha_type 不能直接拿来用，
 # 必须逐个问，接口才知道你要哪个池子。
@@ -48,36 +47,70 @@ ENDPOINTS = {
 
 TIMEOUT = 30
 
+# 链接里必须存在的参数（缺一个就没法发请求）
+REQUIRED_PARAMS = ("resources_id", "record_id", "player_id", "svr_id")
+
+# 链接域名 → 用哪个接口
+KNOWN_HOSTS = {
+    "aki-gm-resources.aki-game.com": "cn",
+    "aki-gm-resources-oversea.aki-game.net": "oversea",
+}
+
 
 # ─────────────────────────── 抓取 ───────────────────────────
 
 
 def parse_link(url: str) -> dict[str, str]:
-    """从抽卡链接里取出请求参数。返回值**不会**被打印。"""
-    parsed = urlparse(url.replace("#", ""))
-    host = parsed.hostname or ""
-    if host == "aki-gm-resources.aki-game.com":
-        region = "cn"
-    elif host == "aki-gm-resources-oversea.aki-game.net":
-        region = "oversea"
-    else:
+    """从抽卡链接里取出请求参数。返回值**不会**被打印。
+
+    要同时兼容几种真实形态，否则会莫名其妙地「缺少参数」：
+
+    1. **终端转义**：在 zsh/bash 里直接粘贴没加引号的 URL，shell 会把 `?` `=` `&` `#`
+       转义成 `\\?` `\\=` `\\&` `\\#`，反斜杠会原样进到参数里，
+       让键变成 `'svr_id\\\\'` 而不是 `'svr_id'`。所以先统一清掉反斜杠。
+    2. **两份 query**：这条链接在 `#` 之前有一份 query（游戏内嵌浏览器拼的），
+       `#/record?…` 之后又有一份（SPA 路由用的）。这里把 `#` 和 `?` 都当作 `&` 切开，
+       逐段收集 `key=value`，后出现的覆盖先出现的（fragment 里那份更权威）。
+    """
+    cleaned = url.strip().strip("\"'").replace("\\", "")
+
+    region = next((r for host, r in KNOWN_HOSTS.items() if host in cleaned), None)
+    if region is None:
         raise SystemExit(
-            f"无法识别的链接域名（{host!r}）。\n"
+            "无法识别的链接域名。\n"
             "国服应为 aki-gm-resources.aki-game.com，国际服应为 aki-gm-resources-oversea.aki-game.net。"
         )
 
-    query = {k: v[0] for k, v in parse_qs(parsed.query).items() if v}
-    missing = [k for k in ("resources_id", "record_id", "player_id", "svr_id") if k not in query]
+    found: dict[str, str] = {}
+    for chunk in cleaned.replace("#", "&").replace("?", "&").split("&"):
+        key, separator, value = chunk.partition("=")
+        key = key.strip()
+        if separator and key:
+            found[key] = value.strip()
+
+    missing = [key for key in REQUIRED_PARAMS if not found.get(key)]
     if missing:
-        raise SystemExit(f"链接里缺少参数：{', '.join(missing)}。请确认复制的是完整的唤取记录 URL。")
+        raise SystemExit(
+            f"链接里缺少参数：{', '.join(missing)}。\n"
+            f"（实际解析到的参数名：{', '.join(sorted(found)) or '（一个都没有）'}）\n"
+            "请确认复制的是完整的唤取记录 URL，并用引号把整条链接包起来。"
+        )
+
+    # player_id 是纯数字，接口那边也是按整数反序列化的。
+    # 如果不是数字，基本可以断定链接被截断或复制错了。
+    if not found["player_id"].isdigit():
+        raise SystemExit(
+            "player_id 不是纯数字，链接可能没复制完整（或复制到了示例/占位链接）。\n"
+            "请重新从游戏内「唤取记录」页面取一次完整链接。"
+        )
 
     return {
         "region": region,
-        "cardPoolId": query["resources_id"],
-        "recordId": query["record_id"],
-        "playerId": query["player_id"],
-        "serverId": query["svr_id"],
-        "languageCode": query.get("lang", "zh-Hans"),
+        "cardPoolId": found["resources_id"],
+        "recordId": found["record_id"],
+        "playerId": found["player_id"],
+        "serverId": found["svr_id"],
+        "languageCode": found.get("lang", "zh-Hans"),
     }
 
 
@@ -97,7 +130,9 @@ def query_pool(params: dict[str, str], pool_type: int) -> list[dict]:
         payload = json.loads(response.read().decode("utf-8"))
 
     if payload.get("code") != 0:
-        raise SystemExit(f"接口返回错误：code={payload.get('code')} message={payload.get('message')!r}")
+        # 接口是 Java 服务，报错信息可能是一整段 stack trace，只留第一行。
+        message = str(payload.get("message", "")).splitlines()[0][:200]
+        raise SystemExit(f"接口返回错误：code={payload.get('code')} message={message!r}")
     return payload.get("data") or []
 
 
