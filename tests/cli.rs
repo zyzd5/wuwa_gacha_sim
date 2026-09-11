@@ -150,3 +150,152 @@ fn start_of_run_state_is_always_fresh() {
         assert_eq!(rejected.code, 2, "{flag} 不应被接受");
     }
 }
+
+// ─────────────────────── --light 与 --repeat ───────────────────────
+
+/// 从 `--light` 的一行里取出 (限定, 常驻)。
+fn parse_light_line(line: &str) -> (u64, u64) {
+    let after = line
+        .split_once("限定 ")
+        .unwrap_or_else(|| panic!("light 行缺少「限定」: {line:?}"))
+        .1;
+    let (limited, rest) = after
+        .split_once(" 常驻 ")
+        .unwrap_or_else(|| panic!("light 行缺少「常驻」: {line:?}"));
+    let standard = rest.split_whitespace().next().expect("缺少常驻数量");
+    (
+        limited.trim().parse().expect("限定数应为整数"),
+        standard.parse().expect("常驻数应为整数"),
+    )
+}
+
+/// 从完整输出里取出某个汇总字段的数值（取第一次出现的那行）。
+fn summary_field(stdout: &str, label: &str) -> u64 {
+    stdout
+        .lines()
+        .find(|line| line.contains(label))
+        .and_then(|line| line.rsplit_once(':'))
+        .map(|(_, value)| value.trim().parse().expect("汇总字段应为整数"))
+        .unwrap_or_else(|| panic!("找不到汇总字段 {label:?}"))
+}
+
+fn light_lines(stdout: &str) -> Vec<(u64, u64)> {
+    stdout
+        .lines()
+        .filter(|line| line.contains("限定 ") && line.contains("seed="))
+        .map(parse_light_line)
+        .collect()
+}
+
+#[test]
+fn light_prints_only_the_two_counts() {
+    let out = run(&["-n", "200", "--seed", "42", "--light", "--no-color"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    // 只应有表头 + 一行结果
+    let body: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert_eq!(body.len(), 3, "light 单次运行应只有 3 行非空输出: {body:?}");
+
+    // 完整模式里的那些区块都不该出现
+    for absent in ["── 汇总 ", "大珊瑚", "结束状态", "与理论值对比", "── 明细 ", "4★"] {
+        assert!(!out.stdout.contains(absent), "light 输出不应包含 {absent:?}");
+    }
+
+    let counts = light_lines(&out.stdout);
+    assert_eq!(counts.len(), 1);
+    assert_eq!(counts[0], (1, 1), "seed=42 的 200 抽应为 限定 1 / 常驻 1");
+}
+
+#[test]
+fn light_agrees_with_full_output_for_the_same_seed() {
+    // --light 只影响渲染，绝不能影响随机流消耗。
+    for seed in ["42", "7", "1234", "999999"] {
+        let full = run(&["-n", "200", "--seed", seed, "--no-color"]);
+        let light = run(&["-n", "200", "--seed", seed, "--light", "--no-color"]);
+
+        let expected = (
+            summary_field(&full.stdout, "  限定 5★"),
+            summary_field(&full.stdout, "  常驻 5★"),
+        );
+        assert_eq!(
+            light_lines(&light.stdout),
+            vec![expected],
+            "seed={seed} 时 light 与完整模式结果不一致"
+        );
+    }
+}
+
+#[test]
+fn repeat_runs_the_simulation_k_times() {
+    let out = run(&["-n", "200", "--seed", "42", "--light", "--repeat", "8", "--no-color"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let lines = light_lines(&out.stdout);
+    assert_eq!(lines.len(), 8, "应输出 8 行结果");
+
+    // 每次都是独立模拟：种子依次递增，所以结果不应全都一样。
+    assert!(
+        lines.iter().any(|line| *line != lines[0]),
+        "8 次独立模拟的结果不应完全相同: {lines:?}"
+    );
+
+    let result_lines: Vec<&str> = out
+        .stdout
+        .lines()
+        .filter(|line| line.contains("seed="))
+        .collect();
+    for (i, line) in result_lines.iter().enumerate() {
+        assert!(
+            line.contains(&format!("seed={}", 42 + i)),
+            "第 {} 行应使用 seed={}: {line:?}",
+            i + 1,
+            42 + i
+        );
+    }
+}
+
+#[test]
+fn loop_is_an_alias_for_repeat() {
+    let a = run(&["-n", "100", "--seed", "5", "--light", "--repeat", "3", "--no-color"]);
+    let b = run(&["-n", "100", "--seed", "5", "--light", "--loop", "3", "--no-color"]);
+    assert_eq!(a.code, 0);
+    assert_eq!(a.stdout, b.stdout, "--loop 应与 --repeat 等价");
+}
+
+#[test]
+fn repeat_zero_is_rejected() {
+    let out = run(&["-n", "10", "--repeat", "0"]);
+    assert_eq!(out.code, 2, "--repeat 0 应退出码 2");
+}
+
+#[test]
+fn repeat_suppresses_detail_by_default_in_full_mode() {
+    let out = run(&["-n", "200", "--seed", "42", "--repeat", "3", "--no-color"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert_eq!(
+        out.stdout.matches("── 第 ").count(),
+        3,
+        "完整模式下每次重复应有一个分节标题"
+    );
+    assert!(
+        !out.stdout.contains("── 明细 "),
+        "重复多次时默认不应打印明细"
+    );
+
+    let forced = run(&["-n", "200", "--seed", "42", "--repeat", "2", "--detail", "--no-color"]);
+    assert!(forced.stdout.contains("── 明细 "), "--detail 应能强制打开明细");
+}
+
+#[test]
+fn single_run_output_is_unchanged_by_the_new_options() {
+    // 不带任何新参数时，输出必须与之前完全一致（含 随机种子 那一行）。
+    let out = run(&["-n", "200", "--seed", "42", "--no-color"]);
+    assert!(out.stdout.contains("随机种子 : 42"));
+    assert!(out.stdout.contains("抽卡次数 : 200"));
+    assert!(!out.stdout.contains("重复次数"));
+    assert!(!out.stdout.contains("基准种子"));
+}

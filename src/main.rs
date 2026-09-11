@@ -34,6 +34,22 @@ struct Cli {
     #[arg(long)]
     detail: bool,
 
+    /// 精简输出：每次模拟只打印一行「限定 / 常驻 5★ 数量」，与 --repeat 搭配使用。
+    /// 此模式下 --detail / --summary-only 无效，因为明细本来就不输出
+    #[arg(long)]
+    light: bool,
+
+    /// 独立重复模拟的次数（别名 --loop）；每次从全新状态开始，
+    /// 第 i 次使用的种子是「基准种子 + i - 1」
+    #[arg(
+        long,
+        visible_alias = "loop",
+        value_name = "K",
+        default_value_t = 1,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    repeat: u64,
+
     /// 关闭 ANSI 颜色
     #[arg(long)]
     no_color: bool,
@@ -42,39 +58,97 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let seed = cli.seed.unwrap_or_else(rng::time_seed);
-    let mut banner = Banner::new(rng::seeded(seed));
+    let base_seed = cli.seed.unwrap_or_else(rng::time_seed);
+    let painter = Painter::new(color_enabled(cli.no_color));
 
-    let show_detail = if cli.summary_only {
-        false
-    } else if cli.detail {
-        true
-    } else {
-        cli.pulls <= DETAIL_THRESHOLD
-    };
+    // --light 不输出明细，因此也不必记录，省内存。
+    let want_detail = !cli.summary_only
+        && (cli.detail || (cli.pulls <= DETAIL_THRESHOLD && cli.repeat == 1));
+    let record_detail = want_detail && !cli.light;
 
-    let mut stats = Stats::new();
-    for index in 1..=cli.pulls {
-        let outcome = banner.pull();
-        stats.record(index, outcome, show_detail);
+    let mut report = render_header(&cli, base_seed, &painter);
+
+    for run in 0..cli.repeat {
+        // 第 i 次用 base_seed + i：既可复现，又保证每次的随机流不同。
+        let seed = base_seed.wrapping_add(run);
+
+        let mut banner = Banner::new(rng::seeded(seed));
+        let mut stats = Stats::new();
+        for index in 1..=cli.pulls {
+            let outcome = banner.pull();
+            stats.record(index, outcome, record_detail);
+        }
+
+        if cli.light {
+            report.push_str(&render_light_line(run, cli.repeat, seed, &stats));
+            continue;
+        }
+
+        if cli.repeat > 1 {
+            report.push_str(&painter.cyan(&rule(&format!(
+                "第 {}/{} 次  seed={seed}",
+                run + 1,
+                cli.repeat
+            ))));
+            report.push('\n');
+        }
+
+        report.push_str(&render_run(&RenderInput {
+            pulls: cli.pulls,
+            stats: &stats,
+            end: EndState {
+                pity5: banner.pity5(),
+                pity4: banner.pity4(),
+                guaranteed5: banner.guaranteed5(),
+            },
+            show_detail: want_detail,
+            painter: &painter,
+        }));
     }
 
-    let painter = Painter::new(color_enabled(cli.no_color));
-    let report = render(&RenderInput {
-        pulls: cli.pulls,
-        seed,
-        stats: &stats,
-        end: EndState {
-            pity5: banner.pity5(),
-            pity4: banner.pity4(),
-            guaranteed5: banner.guaranteed5(),
-        },
-        show_detail,
-        painter: &painter,
-    });
     print!("{report}");
 
     ExitCode::SUCCESS
+}
+
+/// 整次运行只打印一次的表头。
+fn render_header(cli: &Cli, base_seed: u64, p: &Painter) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n",
+        p.bold(if cli.light {
+            "=== 鸣潮 · 角色活动唤取 模拟 · light ==="
+        } else {
+            "=== 鸣潮 · 角色活动唤取 模拟 ==="
+        })
+    ));
+
+    // 单次运行保持既有格式：种子排在抽卡次数之前。
+    if !cli.light && cli.repeat == 1 {
+        out.push_str(&format!("随机种子 : {base_seed}\n"));
+    }
+    out.push_str(&format!("抽卡次数 : {}\n", cli.pulls));
+    if cli.repeat > 1 {
+        out.push_str(&format!("基准种子 : {base_seed}\n"));
+        out.push_str(&format!("重复次数 : {}\n", cli.repeat));
+    }
+    out.push('\n');
+    out
+}
+
+/// `--light` 下每次模拟的一行结果。
+///
+/// 计数在前、种子在后，这样不同位数的种子不会把前面的列推歪。
+fn render_light_line(run: u64, repeat: u64, seed: u64, stats: &Stats) -> String {
+    let body = format!(
+        "限定 {:<2} 常驻 {:<2} seed={seed}",
+        stats.limited5, stats.standard5
+    );
+    if repeat > 1 {
+        format!("#{:<4} {body}\n", run + 1)
+    } else {
+        format!("{body}\n")
+    }
 }
 
 /// 模拟结束时的卡池状态，仅用于展示。
@@ -87,25 +161,16 @@ struct EndState {
 
 struct RenderInput<'a> {
     pulls: u64,
-    seed: u64,
     stats: &'a Stats,
     end: EndState,
     show_detail: bool,
     painter: &'a Painter,
 }
 
-fn render(input: &RenderInput<'_>) -> String {
+fn render_run(input: &RenderInput<'_>) -> String {
     let p = input.painter;
     let stats = input.stats;
     let mut out = String::new();
-
-    // ── 头部 ───────────────────────────────────────────────
-    out.push_str(&format!(
-        "{}\n",
-        p.bold("=== 鸣潮 · 角色活动唤取 模拟 ===")
-    ));
-    out.push_str(&format!("随机种子 : {}\n", input.seed));
-    out.push_str(&format!("抽卡次数 : {}\n\n", input.pulls));
 
     // ── 汇总 ───────────────────────────────────────────────
     out.push_str(&p.cyan(&rule("汇总")));
