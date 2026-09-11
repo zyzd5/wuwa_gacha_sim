@@ -42,7 +42,7 @@ fn run_once(seed: u64) -> (u64, u64, u64) {
         let outcome = banner.pull();
         stats.record(index, outcome, false);
     }
-    (stats.limited5, stats.standard5, stats.four)
+    (stats.limited5, stats.standard5, stats.four())
 }
 
 fn bit_level() {
@@ -168,7 +168,7 @@ fn expectation_level(samples: Vec<(u64, u64, u64)>) {
         exact.limited5,
         exact.standard5,
         exact.five_star(),
-        exact.four
+        exact.four()
     );
     println!(
         "   {:<28} {:>10.4} {:>10.4} {:>10.4} {:>12.4}",
@@ -199,7 +199,7 @@ fn expectation_level(samples: Vec<(u64, u64, u64)>) {
             "   {pulls:<10} {:>10.3} {:>10.3} {:>12.1} {:>11.4}% {:>11.4}%",
             e.five_star(),
             e.limited5,
-            e.four,
+            e.four(),
             e.five_star_rate(pulls) * 100.0,
             e.four_rate(pulls) * 100.0
         );

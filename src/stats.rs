@@ -29,8 +29,10 @@ pub struct Stats {
     pub limited5: u64,
     /// 常驻 5★ 数量（等于「歪」的次数）。
     pub standard5: u64,
-    /// 4★ 内容数量。
-    pub four: u64,
+    /// 4★ **角色**数量（假设已满共鸣链，每个给 8 大珊瑚）。
+    pub four_character: u64,
+    /// 4★ **武器**数量（每个固定给 3 大珊瑚）。
+    pub four_weapon: u64,
     /// 3★ 武器数量。
     pub three: u64,
     /// 累计获得的大珊瑚。
@@ -79,8 +81,12 @@ impl Stats {
                     });
                 }
             }
-            Item::Four => {
-                self.four += 1;
+            Item::FourCharacter | Item::FourWeapon => {
+                if outcome.item == Item::FourCharacter {
+                    self.four_character += 1;
+                } else {
+                    self.four_weapon += 1;
+                }
                 if record_detail {
                     let seq = self.details.len() as u64 + 1;
                     self.details.push(Detail {
@@ -99,6 +105,12 @@ impl Stats {
     #[must_use]
     pub fn five_star_total(&self) -> u64 {
         self.limited5 + self.standard5
+    }
+
+    /// 4★ 内容总数。
+    #[must_use]
+    pub fn four(&self) -> u64 {
+        self.four_character + self.four_weapon
     }
 
     /// 5★ 综合出率。
@@ -122,13 +134,13 @@ impl Stats {
     /// 4★ 出率。
     #[must_use]
     pub fn four_star_rate(&self) -> Option<f64> {
-        ratio(self.four, self.pulls)
+        ratio(self.four(), self.pulls)
     }
 
     /// 平均每 4★ 抽数。
     #[must_use]
     pub fn mean_pulls_per_4star(&self) -> Option<f64> {
-        ratio(self.pulls, self.four)
+        ratio(self.pulls, self.four())
     }
 
     /// 3★ 武器出率。

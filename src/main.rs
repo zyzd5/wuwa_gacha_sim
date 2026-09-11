@@ -203,7 +203,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
     );
     out.push('\n');
 
-    row(&mut out, "4★ 总数", stats.four);
+    row(&mut out, "4★ 总数", stats.four());
     row(
         &mut out,
         "  4★ 出率",
@@ -251,13 +251,25 @@ fn render_run(input: &RenderInput<'_>) -> String {
     );
     row(
         &mut out,
-        "  4★（按满链）",
+        "  4★ 角色",
         format!(
-            "{} × {} = {:>4}    (3 基础 + {} 满链转化)",
-            stats.four,
-            gacha::CORAL_4STAR,
-            stats.four * u64::from(gacha::CORAL_4STAR),
+            "{} × {} = {:>4}    ({} 基础 + {} 满链转化)",
+            stats.four_character,
+            gacha::CORAL_4STAR_CHARACTER,
+            stats.four_character * u64::from(gacha::CORAL_4STAR_CHARACTER),
+            gacha::CORAL_4STAR_BASE,
             gacha::CORAL_4STAR_MAXED_BONUS
+        ),
+    );
+    row(
+        &mut out,
+        "  4★ 武器",
+        format!(
+            "{} × {} = {:>4}    (武器没有共鸣链，固定 {} 个)",
+            stats.four_weapon,
+            gacha::CORAL_4STAR_WEAPON,
+            stats.four_weapon * u64::from(gacha::CORAL_4STAR_WEAPON),
+            gacha::CORAL_4STAR_WEAPON
         ),
     );
     row(
@@ -349,7 +361,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
     row(
         &mut out,
         "期望 4★ 总数",
-        format!("{:.1}   实际 {}", input.expected.four, stats.four),
+        format!("{:.1}   实际 {}", input.expected.four(), stats.four()),
     );
     row(
         &mut out,
@@ -376,7 +388,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
                     Item::Limited5 if d.used_guarantee => "   (歪后大保底)",
                     Item::Limited5 => "   (50/50 成功)",
                     Item::Standard5 => "   (50/50 失败 → 下次必限定)",
-                    Item::Four | Item::Three => "",
+                    Item::FourCharacter | Item::FourWeapon | Item::Three => "",
                 };
                 out.push_str(&format!(
                     "#{:<3}第 {:>4} 抽   {} {:<4}大珊瑚{}\n",

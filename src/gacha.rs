@@ -40,10 +40,23 @@ pub const CORAL_5STAR_LIMITED: u32 = 15;
 pub const CORAL_5STAR_STANDARD: u32 = 45;
 /// 歪补偿的额度，仅用于输出说明。
 pub const CORAL_STANDARD_5STAR_BONUS: u32 = 30;
-/// 4★ 内容：3 基础 + 5（假设 4★ 角色均已满共鸣链）。
-pub const CORAL_4STAR: u32 = 8;
+/// 4★ **角色**：3 基础 + 5（假设 4★ 角色均已满共鸣链）。
+pub const CORAL_4STAR_CHARACTER: u32 = 8;
+/// 4★ **角色**的基础档位，仅用于输出说明。
+pub const CORAL_4STAR_BASE: u32 = 3;
 /// 4★ 满共鸣链转化的额度，仅用于输出说明。
 pub const CORAL_4STAR_MAXED_BONUS: u32 = 5;
+/// 4★ **武器**：固定 3。武器没有共鸣链，不存在满链转化。
+pub const CORAL_4STAR_WEAPON: u32 = 3;
+/// 4★ 内容里**武器**所占的比例。
+///
+/// ⚠️ **这是本模拟器唯一没有官方依据的数值。**
+/// 官方公示只说「4★ 内容基础概率 6%，其中 50% 为任一 UP 角色（角色池每期 3 个）」，
+/// 对非 UP 的那 50% 里角色与武器各占多少**从未公开**，攻略站也只写「4★ 武器/4★ 角色」。
+///
+/// 这里取 0.25，即假设非 UP 的那一半在「角色」与「武器」之间均分。
+/// 想要更贴合实际，直接改这个常量即可（它会同时影响 4★ 珊瑚与总珊瑚的理论值）。
+pub const FOUR_STAR_WEAPON_SHARE: f64 = 0.25;
 /// 8 个大珊瑚兑换 1 抽。
 pub const CORAL_PER_PULL_EXCHANGE: u32 = 8;
 
@@ -54,7 +67,10 @@ pub const CORAL_PER_PULL_EXCHANGE: u32 = 8;
 /// 5★ 部分为精确解析解；4★/3★ 与珊瑚为 2000 万抽参考模拟的实测值。
 /// [`crate::tests`] 中的大样本校验会重新用模拟验证这些数。
 pub mod theory {
-    use super::{CORAL_4STAR, CORAL_5STAR_LIMITED, CORAL_5STAR_STANDARD, p4, p5};
+    use super::{
+        CORAL_4STAR_CHARACTER, CORAL_4STAR_WEAPON, CORAL_5STAR_LIMITED, CORAL_5STAR_STANDARD,
+        FOUR_STAR_WEAPON_SHARE, p4, p5,
+    };
 
     /// 5★ 综合出率（含保底），**长期平稳值**。
     pub const P5: f64 = 0.018_648;
@@ -73,7 +89,8 @@ pub mod theory {
     /// 平均每抽大珊瑚，**长期平稳值**。
     pub const CORAL_PER_PULL: f64 = P5_LIMITED * CORAL_5STAR_LIMITED as f64
         + P5_STANDARD * CORAL_5STAR_STANDARD as f64
-        + P4 * CORAL_4STAR as f64;
+        + P4 * ((1.0 - FOUR_STAR_WEAPON_SHARE) * CORAL_4STAR_CHARACTER as f64
+            + FOUR_STAR_WEAPON_SHARE * CORAL_4STAR_WEAPON as f64);
 
     // ────────────────── 从零保底起步的精确期望 ──────────────────
     //
@@ -91,8 +108,16 @@ pub mod theory {
     const P4_STATES: usize = super::P4_HARD_PITY as usize;
     /// 「是否处于大保底」两种状态。
     const G_STATES: usize = 2;
-    /// 每个状态携带的期望值个数：限定 5★ / 常驻 5★ / 4★。
-    const LANES: usize = 3;
+    /// 每个状态携带的期望值个数：限定 5★ / 常驻 5★ / 4★ 角色 / 4★ 武器。
+    const LANES: usize = 4;
+    /// 限定 5★ 所在的 lane。
+    const LANE_LIMITED: usize = 0;
+    /// 常驻 5★ 所在的 lane。
+    const LANE_STANDARD: usize = 1;
+    /// 4★ 角色所在的 lane。
+    const LANE_FOUR_CHARACTER: usize = 2;
+    /// 4★ 武器所在的 lane。
+    const LANE_FOUR_WEAPON: usize = 3;
     /// 精确 DP 的步数上限；超过之后过程已进入平稳期，改用实测增量线性外推。
     const EXACT_LIMIT: u64 = 2_000;
     /// 估计平稳期每抽增量时额外多走的步数。
@@ -105,8 +130,10 @@ pub mod theory {
         pub limited5: f64,
         /// 期望获得的常驻 5★ 数（即「歪」的次数）。
         pub standard5: f64,
-        /// 期望获得的 4★ 内容数。
-        pub four: f64,
+        /// 期望获得的 4★ **角色**数。
+        pub four_character: f64,
+        /// 期望获得的 4★ **武器**数。
+        pub four_weapon: f64,
     }
 
     impl Expectations {
@@ -116,12 +143,19 @@ pub mod theory {
             self.limited5 + self.standard5
         }
 
+        /// 期望 4★ 内容总数。
+        #[must_use]
+        pub fn four(&self) -> f64 {
+            self.four_character + self.four_weapon
+        }
+
         /// 期望大珊瑚总量。
         #[must_use]
         pub fn coral(&self) -> f64 {
             self.limited5 * f64::from(CORAL_5STAR_LIMITED)
                 + self.standard5 * f64::from(CORAL_5STAR_STANDARD)
-                + self.four * f64::from(CORAL_4STAR)
+                + self.four_character * f64::from(CORAL_4STAR_CHARACTER)
+                + self.four_weapon * f64::from(CORAL_4STAR_WEAPON)
         }
 
         /// 折算出的 5★ 出率。
@@ -133,7 +167,7 @@ pub mod theory {
         /// 折算出的 4★ 出率。
         #[must_use]
         pub fn four_rate(&self, pulls: u64) -> f64 {
-            per_pull(self.four, pulls)
+            per_pull(self.four(), pulls)
         }
 
         /// 折算出的平均每抽大珊瑚。
@@ -151,7 +185,7 @@ pub mod theory {
         /// 折算出的平均每 4★ 抽数。
         #[must_use]
         pub fn mean_pulls_per_4star(&self, pulls: u64) -> f64 {
-            reciprocal_mean(self.four, pulls)
+            reciprocal_mean(self.four(), pulls)
         }
     }
 
@@ -187,7 +221,10 @@ pub mod theory {
         Expectations {
             limited5: base.limited5 + extra * (ahead.limited5 - base.limited5) * per_step,
             standard5: base.standard5 + extra * (ahead.standard5 - base.standard5) * per_step,
-            four: base.four + extra * (ahead.four - base.four) * per_step,
+            four_character: base.four_character
+                + extra * (ahead.four_character - base.four_character) * per_step,
+            four_weapon: base.four_weapon
+                + extra * (ahead.four_weapon - base.four_weapon) * per_step,
         }
     }
 
@@ -214,13 +251,13 @@ pub mod theory {
                     // 出 5★ 这一支与 pity4 无关，先算好，避免在 p4 循环里重复计算。
                     let mut five_star = [0.0f64; LANES];
                     for (lane, slot) in five_star.iter_mut().enumerate() {
-                        let limited_hit =
-                            cur[limited_landing + lane] + if lane == 0 { 1.0 } else { 0.0 };
+                        let limited_hit = cur[limited_landing + lane]
+                            + if lane == LANE_LIMITED { 1.0 } else { 0.0 };
                         *slot = if guaranteed == 1 {
                             limited_hit
                         } else {
-                            let standard_hit =
-                                cur[standard_landing + lane] + if lane == 1 { 1.0 } else { 0.0 };
+                            let standard_hit = cur[standard_landing + lane]
+                                + if lane == LANE_STANDARD { 1.0 } else { 0.0 };
                             0.5 * limited_hit + 0.5 * standard_hit
                         };
                     }
@@ -232,8 +269,13 @@ pub mod theory {
                         let base = lane_index(pity5, guaranteed, pity4);
 
                         for lane in 0..LANES {
-                            let after_four =
-                                cur[hit_four + lane] + if lane == 2 { 1.0 } else { 0.0 };
+                            // 4★ 里有 FOUR_STAR_WEAPON_SHARE 的比例是武器，其余是角色。
+                            let as_character = cur[hit_four + lane]
+                                + if lane == LANE_FOUR_CHARACTER { 1.0 } else { 0.0 };
+                            let as_weapon = cur[hit_four + lane]
+                                + if lane == LANE_FOUR_WEAPON { 1.0 } else { 0.0 };
+                            let after_four = (1.0 - FOUR_STAR_WEAPON_SHARE) * as_character
+                                + FOUR_STAR_WEAPON_SHARE * as_weapon;
                             let after_miss = cur[miss + lane];
                             next[base + lane] = chance5 * five_star[lane]
                                 + (1.0 - chance5)
@@ -247,9 +289,10 @@ pub mod theory {
 
         let start = lane_index(0, 0, 0);
         Expectations {
-            limited5: cur[start],
-            standard5: cur[start + 1],
-            four: cur[start + 2],
+            limited5: cur[start + LANE_LIMITED],
+            standard5: cur[start + LANE_STANDARD],
+            four_character: cur[start + LANE_FOUR_CHARACTER],
+            four_weapon: cur[start + LANE_FOUR_WEAPON],
         }
     }
 }
@@ -279,7 +322,8 @@ pub fn p5(n: u32) -> f64 {
 
 /// 单抽出 4★ 的概率。
 ///
-/// 本模拟器不实现 4★ 的 50/50，也不拆分 UP / 非 UP，4★ 只按概率产出并计数。
+/// 本模拟器不实现 4★ 的 50/50，也不区分 UP / 非 UP；
+/// 但会把 4★ **角色**与 4★ **武器**分开统计，因为两者给的大珊瑚不同。
 #[must_use]
 pub fn p4(n: u32) -> f64 {
     if n >= P4_HARD_PITY { 1.0 } else { P4_BASE }
@@ -292,8 +336,10 @@ pub enum Item {
     Limited5,
     /// 常驻 5★ 角色，玩家口中的「歪」。
     Standard5,
-    /// 4★ 内容（角色或武器）。
-    Four,
+    /// 4★ 内容：角色（假设已满共鸣链，给 8 大珊瑚）。
+    FourCharacter,
+    /// 4★ 内容：武器（固定给 3 大珊瑚）。
+    FourWeapon,
     /// 3★ 武器。
     Three,
 }
@@ -305,7 +351,8 @@ impl Item {
         match self {
             Item::Limited5 => CORAL_5STAR_LIMITED,
             Item::Standard5 => CORAL_5STAR_STANDARD,
-            Item::Four => CORAL_4STAR,
+            Item::FourCharacter => CORAL_4STAR_CHARACTER,
+            Item::FourWeapon => CORAL_4STAR_WEAPON,
             Item::Three => 0,
         }
     }
@@ -322,7 +369,8 @@ impl Item {
         match self {
             Item::Limited5 => "5★  限定",
             Item::Standard5 => "5★  常驻",
-            Item::Four => "4★  内容",
+            Item::FourCharacter => "4★  角色",
+            Item::FourWeapon => "4★  武器",
             Item::Three => "3★  武器",
         }
     }
@@ -404,7 +452,11 @@ impl<R: Rng> Banner<R> {
             if self.rng.random::<f64>() < p4(self.pity4 + 1) {
                 self.pity4 = 0;
                 PullOutcome {
-                    item: Item::Four,
+                    item: if self.rng.random::<f64>() < FOUR_STAR_WEAPON_SHARE {
+                        Item::FourWeapon
+                    } else {
+                        Item::FourCharacter
+                    },
                     used_guarantee: false,
                 }
             } else {

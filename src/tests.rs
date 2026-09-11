@@ -5,8 +5,9 @@
 use rand::RngCore;
 
 use crate::gacha::{
-    Banner, CORAL_4STAR, CORAL_4STAR_MAXED_BONUS, CORAL_5STAR_LIMITED, CORAL_5STAR_STANDARD,
-    CORAL_STANDARD_5STAR_BONUS, Item, P4_HARD_PITY, P5_HARD_PITY, p4, p5, theory,
+    Banner, CORAL_4STAR_BASE, CORAL_4STAR_CHARACTER, CORAL_4STAR_MAXED_BONUS, CORAL_4STAR_WEAPON,
+    CORAL_5STAR_LIMITED, CORAL_5STAR_STANDARD, CORAL_STANDARD_5STAR_BONUS, FOUR_STAR_WEAPON_SHARE,
+    Item, P4_HARD_PITY, P5_HARD_PITY, p4, p5, theory,
 };
 use crate::rng;
 use crate::stats::Stats;
@@ -139,7 +140,7 @@ fn pass_rng_yields_five_star_every_pull() {
     let (items, stats) = run(FixedRng::PASS, 10);
     assert!(items.iter().all(|i| *i == Item::Limited5));
     assert_eq!(stats.limited5, 10);
-    assert_eq!(stats.four, 0);
+    assert_eq!(stats.four(), 0);
     assert_eq!(stats.three, 0);
 }
 
@@ -154,7 +155,7 @@ fn pity4_is_reset_by_five_star() {
     let four_star_pulls: Vec<usize> = items
         .iter()
         .enumerate()
-        .filter(|(_, item)| **item == Item::Four)
+        .filter(|(_, item)| **item == Item::FourCharacter || **item == Item::FourWeapon)
         .map(|(i, _)| i + 1)
         .collect();
 
@@ -173,12 +174,16 @@ fn pity4_is_reset_by_five_star() {
 fn coral_constants_match_rules() {
     assert_eq!(CORAL_5STAR_LIMITED, 15);
     assert_eq!(CORAL_5STAR_STANDARD, 45);
-    assert_eq!(CORAL_4STAR, 8);
+    assert_eq!(CORAL_4STAR_CHARACTER, 8);
     // 「歪」相对限定恰好多出 30。
     assert_eq!(CORAL_5STAR_STANDARD - CORAL_5STAR_LIMITED, CORAL_STANDARD_5STAR_BONUS);
     assert_eq!(CORAL_STANDARD_5STAR_BONUS, 30);
     // 4★ 的 8 = 3 基础 + 5 满共鸣链转化。
-    assert_eq!(CORAL_4STAR - CORAL_4STAR_MAXED_BONUS, 3);
+    assert_eq!(CORAL_4STAR_CHARACTER - CORAL_4STAR_MAXED_BONUS, CORAL_4STAR_BASE);
+    assert_eq!(CORAL_4STAR_BASE, 3);
+    // 4★ 武器固定 3：武器没有共鸣链，不存在满链转化。
+    assert_eq!(CORAL_4STAR_WEAPON, 3);
+    assert_eq!(CORAL_4STAR_WEAPON, CORAL_4STAR_BASE);
 }
 
 #[test]
@@ -196,7 +201,8 @@ fn coral_identity_holds_over_a_large_run() {
 
     let expected = stats.limited5 * u64::from(CORAL_5STAR_LIMITED)
         + stats.standard5 * u64::from(CORAL_5STAR_STANDARD)
-        + stats.four * u64::from(CORAL_4STAR);
+        + stats.four_character * u64::from(CORAL_4STAR_CHARACTER)
+        + stats.four_weapon * u64::from(CORAL_4STAR_WEAPON);
     assert_eq!(
         stats.coral, expected,
         "大珊瑚总量必须等于 限定5★×15 + 常驻5★×45 + 4★×8"
@@ -204,7 +210,7 @@ fn coral_identity_holds_over_a_large_run() {
 
     // 顺带确认三档稀有度把总抽数分干净了。
     assert_eq!(
-        stats.limited5 + stats.standard5 + stats.four + stats.three,
+        stats.limited5 + stats.standard5 + stats.four() + stats.three,
         stats.pulls
     );
 }
@@ -218,7 +224,7 @@ fn same_seed_produces_identical_results() {
 
     assert_eq!(a.limited5, b.limited5);
     assert_eq!(a.standard5, b.standard5);
-    assert_eq!(a.four, b.four);
+    assert_eq!(a.four(), b.four());
     assert_eq!(a.three, b.three);
     assert_eq!(a.coral, b.coral);
     assert_eq!(a.min_gap(), b.min_gap());
@@ -267,7 +273,9 @@ fn theory_constants_are_self_consistent() {
 
     let expected_coral = theory::P5_LIMITED * f64::from(CORAL_5STAR_LIMITED)
         + theory::P5_STANDARD * f64::from(CORAL_5STAR_STANDARD)
-        + theory::P4 * f64::from(CORAL_4STAR);
+        + theory::P4
+            * ((1.0 - FOUR_STAR_WEAPON_SHARE) * f64::from(CORAL_4STAR_CHARACTER)
+                + FOUR_STAR_WEAPON_SHARE * f64::from(CORAL_4STAR_WEAPON));
     assert!((theory::CORAL_PER_PULL - expected_coral).abs() < 1e-12);
 }
 
@@ -298,7 +306,7 @@ fn expectations_are_monotonic_and_continuous_at_the_extrapolation_boundary() {
     for pulls in (20..=320_u64).step_by(20) {
         let current = theory::expectations(pulls);
         assert!(current.five_star() >= previous.five_star());
-        assert!(current.four >= previous.four);
+        assert!(current.four() >= previous.four());
         previous = current;
     }
 
@@ -325,7 +333,7 @@ fn expectations_match_a_simulated_fresh_start() {
         let (_, stats) = run(rng::seeded(1_000_000 + trial), PULLS);
         limited += stats.limited5;
         standard += stats.standard5;
-        four += stats.four;
+        four += stats.four();
     }
     let measured_limited = limited as f64 / RUNS as f64;
     let measured_standard = standard as f64 / RUNS as f64;
@@ -343,9 +351,9 @@ fn expectations_match_a_simulated_fresh_start() {
         expected.standard5
     );
     assert!(
-        (measured_four - expected.four).abs() < 0.6,
+        (measured_four - expected.four()).abs() < 0.6,
         "4★：实测 {measured_four} vs 期望 {}",
-        expected.four
+        expected.four()
     );
 }
 
@@ -390,8 +398,16 @@ fn large_sample_matches_theory() {
         "4★ 出率 {four_star_rate} 超出 [11.8%, 12.5%]"
     );
     assert!(
-        (1.40..=1.48).contains(&coral_per_pull),
-        "平均每抽大珊瑚 {coral_per_pull} 超出 [1.40, 1.48]"
+        (1.25..=1.32).contains(&coral_per_pull),
+        "平均每抽大珊瑚 {coral_per_pull} 超出 [1.25, 1.32]"
+    );
+
+    // 4★ 里武器的占比应当收敛到 FOUR_STAR_WEAPON_SHARE。
+    let weapon_share = stats.four_weapon as f64 / stats.four() as f64;
+    println!("4★ 武器占比    : {:.4}  (设定 {FOUR_STAR_WEAPON_SHARE})", weapon_share);
+    assert!(
+        (weapon_share - FOUR_STAR_WEAPON_SHARE).abs() < 0.01,
+        "4★ 武器占比 {weapon_share} 偏离设定值 {FOUR_STAR_WEAPON_SHARE}"
     );
 
     assert!(within(five_star_rate, theory::P5, 0.05));
