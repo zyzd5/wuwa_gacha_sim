@@ -271,6 +271,84 @@ fn theory_constants_are_self_consistent() {
     assert!((theory::CORAL_PER_PULL - expected_coral).abs() < 1e-12);
 }
 
+// ─────────────────── 从零保底起步的精确期望（DP）───────────────────
+
+#[test]
+fn expectations_from_a_fresh_start_are_below_the_long_run_rate() {
+    // 前 65 抽享受不到软保底，所以短抽数的期望必然低于「抽数 × 长期出率」。
+    for pulls in [80_u64, 200, 500] {
+        let expected = theory::expectations(pulls);
+        assert!(
+            expected.five_star() < pulls as f64 * theory::P5,
+            "{pulls} 抽的期望 5★ 应低于长期口径"
+        );
+    }
+    // 200 抽的差距不小：3.25 vs 3.73，这正是不能直接用长期率的地方。
+    assert!((theory::expectations(200).five_star() - 3.251).abs() < 0.01);
+    // 抽数足够大时收敛到长期率。
+    let huge = theory::expectations(20_000_000);
+    assert!((huge.five_star_rate(20_000_000) - theory::P5).abs() < 1e-5);
+    assert!((huge.four_rate(20_000_000) - theory::P4).abs() < 1e-4);
+}
+
+#[test]
+fn expectations_are_monotonic_and_continuous_at_the_extrapolation_boundary() {
+    let mut previous = theory::expectations(0);
+    // 每 20 抽采一个点即可：DP 每次调用都要从头递推，密采样只会拖慢测试。
+    for pulls in (20..=320_u64).step_by(20) {
+        let current = theory::expectations(pulls);
+        assert!(current.five_star() >= previous.five_star());
+        assert!(current.four >= previous.four);
+        previous = current;
+    }
+
+    // 2000 步是精确 DP 与外推的分界，跨过去不能有跳变。
+    let at_limit = theory::expectations(2_000);
+    let just_after = theory::expectations(2_001);
+    let step = just_after.five_star() - at_limit.five_star();
+    assert!(
+        (step - 1.0 / theory::MEAN_PULLS_PER_5STAR).abs() < 0.01,
+        "分界处的每抽增量 {step} 应接近长期每抽出金率"
+    );
+}
+
+#[test]
+fn expectations_match_a_simulated_fresh_start() {
+    // 2000 次独立模拟 × 200 抽，与 DP 精确期望对照。
+    const PULLS: u64 = 200;
+    const RUNS: u64 = 2_000;
+
+    let mut limited = 0_u64;
+    let mut standard = 0_u64;
+    let mut four = 0_u64;
+    for trial in 0..RUNS {
+        let (_, stats) = run(rng::seeded(1_000_000 + trial), PULLS);
+        limited += stats.limited5;
+        standard += stats.standard5;
+        four += stats.four;
+    }
+    let measured_limited = limited as f64 / RUNS as f64;
+    let measured_standard = standard as f64 / RUNS as f64;
+    let measured_four = four as f64 / RUNS as f64;
+
+    let expected = theory::expectations(PULLS);
+    assert!(
+        (measured_limited - expected.limited5).abs() < 0.12,
+        "限定 5★：实测 {measured_limited} vs 期望 {}",
+        expected.limited5
+    );
+    assert!(
+        (measured_standard - expected.standard5).abs() < 0.12,
+        "常驻 5★：实测 {measured_standard} vs 期望 {}",
+        expected.standard5
+    );
+    assert!(
+        (measured_four - expected.four).abs() < 0.6,
+        "4★：实测 {measured_four} vs 期望 {}",
+        expected.four
+    );
+}
+
 // ─────────────────────────── 大样本校验 ───────────────────────────
 
 /// 200 万抽的蒙特卡洛校验，用于确认实现与理论值一致。

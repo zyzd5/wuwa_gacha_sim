@@ -66,6 +66,9 @@ fn main() -> ExitCode {
         && (cli.detail || (cli.pulls <= DETAIL_THRESHOLD && cli.repeat == 1));
     let record_detail = want_detail && !cli.light;
 
+    // 期望值只取决于抽数，与种子无关，算一次就够。
+    let expected = gacha::theory::expectations(cli.pulls);
+
     let mut report = render_header(&cli, base_seed, &painter);
 
     for run in 0..cli.repeat {
@@ -95,6 +98,7 @@ fn main() -> ExitCode {
 
         report.push_str(&render_run(&RenderInput {
             pulls: cli.pulls,
+            expected,
             stats: &stats,
             end: EndState {
                 pity5: banner.pity5(),
@@ -161,6 +165,8 @@ struct EndState {
 
 struct RenderInput<'a> {
     pulls: u64,
+    /// 从零保底起步的**精确**期望，随抽数变化（不是长期平稳值）。
+    expected: gacha::theory::Expectations,
     stats: &'a Stats,
     end: EndState,
     show_detail: bool,
@@ -184,7 +190,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
         "  综合出金率",
         with_theory(
             pct(stats.five_star_rate()),
-            &format!("{:.2}%", gacha::theory::P5 * 100.0),
+            &theory_pct(input.expected.five_star_rate(input.pulls), input.pulls),
         ),
     );
     row(
@@ -192,7 +198,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
         "  平均出金抽数",
         with_theory(
             num2(stats.mean_pulls_per_5star()),
-            &format!("{:.2}", gacha::theory::MEAN_PULLS_PER_5STAR),
+            &theory_num(input.expected.mean_pulls_per_5star(input.pulls), input.pulls, 2),
         ),
     );
     out.push('\n');
@@ -203,7 +209,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
         "  4★ 出率",
         with_theory(
             pct(stats.four_star_rate()),
-            &format!("{:.2}%", gacha::theory::P4 * 100.0),
+            &theory_pct(input.expected.four_rate(input.pulls), input.pulls),
         ),
     );
     row(
@@ -211,7 +217,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
         "  平均每 4★ 抽数",
         with_theory(
             num2(stats.mean_pulls_per_4star()),
-            &format!("{:.2}", gacha::theory::MEAN_PULLS_PER_4STAR),
+            &theory_num(input.expected.mean_pulls_per_4star(input.pulls), input.pulls, 2),
         ),
     );
     out.push('\n');
@@ -259,7 +265,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
         "平均每抽",
         with_theory(
             num2(stats.coral_per_pull()),
-            &format!("{:.2}", gacha::theory::CORAL_PER_PULL),
+            &theory_num(input.expected.coral_per_pull(input.pulls), input.pulls, 2),
         ),
     );
     row(
@@ -269,7 +275,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
             stats
                 .coral_per_pull()
                 .map_or("-".to_string(), |v| format!("{:.1}", v * 100.0)),
-            &format!("{:.1}", gacha::theory::CORAL_PER_PULL * 100.0),
+            &theory_num(input.expected.coral_per_pull(input.pulls) * 100.0, input.pulls, 1),
         ),
     );
     out.push('\n');
@@ -312,8 +318,7 @@ fn render_run(input: &RenderInput<'_>) -> String {
     out.push_str(&p.cyan(&rule("与理论值对比")));
     out.push('\n');
 
-    let n = input.pulls as f64;
-    let expected5 = gacha::theory::P5 * n;
+    let expected5 = input.expected.five_star();
     let deviation = if expected5 > 0.0 {
         format!(
             "      (偏差 {:+.1}%)",
@@ -337,21 +342,21 @@ fn render_run(input: &RenderInput<'_>) -> String {
         "期望限定 5★",
         format!(
             "{:.2}   实际 {}",
-            gacha::theory::P5_LIMITED * n,
+            input.expected.limited5,
             stats.limited5
         ),
     );
     row(
         &mut out,
         "期望 4★ 总数",
-        format!("{:.1}   实际 {}", gacha::theory::P4 * n, stats.four),
+        format!("{:.1}   实际 {}", input.expected.four, stats.four),
     );
     row(
         &mut out,
         "期望大珊瑚",
         format!(
             "{:.1}   实际 {}",
-            gacha::theory::CORAL_PER_PULL * n,
+            input.expected.coral(),
             stats.coral
         ),
     );
@@ -394,6 +399,24 @@ fn row(out: &mut String, label: &str, value: impl std::fmt::Display) {
     out.push_str(": ");
     out.push_str(&value.to_string());
     out.push('\n');
+}
+
+/// 理论出率的显示形式；抽数为 0 时显示 `-`。
+fn theory_pct(rate: f64, pulls: u64) -> String {
+    if pulls == 0 {
+        "-".to_string()
+    } else {
+        format!("{:.2}%", rate * 100.0)
+    }
+}
+
+/// 理论均值的显示形式；抽数为 0 时显示 `-`。
+fn theory_num(value: f64, pulls: u64, digits: usize) -> String {
+    if pulls == 0 {
+        "-".to_string()
+    } else {
+        format!("{value:.digits$}")
+    }
 }
 
 /// 拼出 `值` + 对齐的 `[理论 …]` 后缀。
