@@ -5,3 +5,10 @@
 
 # 沙箱内的本地 cargo 缓存（不进版本库；正常开发用 ~/.cargo 即可）
 /.cargo-home
+
+__pycache__/
+
+# 抽卡记录导出（含账号相关字段，绝不进版本库）
+/tools/*.json
+/tools/*.csv
+/tools/*.txt
