@@ -398,8 +398,8 @@ fn large_sample_matches_theory() {
         "4★ 出率 {four_star_rate} 超出 [11.8%, 12.5%]"
     );
     assert!(
-        (1.25..=1.32).contains(&coral_per_pull),
-        "平均每抽大珊瑚 {coral_per_pull} 超出 [1.25, 1.32]"
+        (1.33..=1.39).contains(&coral_per_pull),
+        "平均每抽大珊瑚 {coral_per_pull} 超出 [1.33, 1.39]"
     );
 
     // 4★ 里武器的占比应当收敛到 FOUR_STAR_WEAPON_SHARE。

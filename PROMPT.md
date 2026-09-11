@@ -120,7 +120,7 @@ pub const CORAL_5STAR_STANDARD: u32 = 45;   // = 15 基础 + 30「歪」补偿
 pub const CORAL_4STAR_CHARACTER: u32 = 8;   // = 3 基础 + 5（假设已满共鸣链）
 pub const CORAL_4STAR_WEAPON: u32 = 3;      // 武器无共鸣链，固定 3
 pub const CORAL_PER_PULL_EXCHANGE: u32 = 8; // 8 个珊瑚换 1 抽
-pub const FOUR_STAR_WEAPON_SHARE: f64 = 0.25; // ⚠️ 官方未公示，这是假设值
+pub const FOUR_STAR_WEAPON_SHARE: f64 = 0.13; // ⚠️ 官方未公示；0.13 是实测值
 ```
 
 **恒等式**（必须用一个单元测试锁死）：
@@ -134,8 +134,10 @@ pub const FOUR_STAR_WEAPON_SHARE: f64 = 0.25; // ⚠️ 官方未公示，这是
 1. **假设所有 4★ 角色均已满共鸣链**，故每个 4★ 角色按 8 计；4★ 武器固定 3。
 2. **不计算 5★ 的满命加成**。真实规则中 5★ 角色第 8 次及以后重复获得给 40；
    本模拟器不做角色重复计数，限定 5★ 一律按 15 计。
-3. **4★ 里武器的占比没有官方依据**（官方只说「50% 为 UP 角色」，非 UP 那半的构成未公开），
-   取 `FOUR_STAR_WEAPON_SHARE = 0.25`，README 必须明确标注这是假设。
+3. **4★ 里武器的占比没有官方依据**（官方只说「50% 为 UP 角色」，非 UP 那半的构成未公开）。
+   取值来自 `tools/gacha_history.py` 对真实唤取记录的实测统计：38 个 4★ 中 5 个武器，
+   点估计 13.2%（Wilson 95% CI [5.8%, 27.3%]），故取 `FOUR_STAR_WEAPON_SHARE = 0.13`。
+   README 必须写明这是实测值、样本量与置信区间。
 
 **明确不实现**：
 
