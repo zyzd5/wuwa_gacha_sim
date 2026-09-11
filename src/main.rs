@@ -114,7 +114,6 @@ fn render(input: &RenderInput<'_>) -> String {
     row(&mut out, "5★ 总数", stats.five_star_total());
     row(&mut out, "  限定 5★", stats.limited5);
     row(&mut out, "  常驻 5★(歪)", stats.standard5);
-    row(&mut out, "  歪(50/50 失败)", format!("{} 次", stats.standard5));
     row(
         &mut out,
         "  综合出金率",
@@ -149,23 +148,6 @@ fn render(input: &RenderInput<'_>) -> String {
             num2(stats.mean_pulls_per_4star()),
             &format!("{:.2}", gacha::theory::MEAN_PULLS_PER_4STAR),
         ),
-    );
-    out.push('\n');
-
-    row(
-        &mut out,
-        "3★ 武器",
-        format!("{:<6}({})", stats.three, pct(stats.three_star_rate())),
-    );
-    out.push('\n');
-
-    row(
-        &mut out,
-        "5★ 最欧 / 最非",
-        match (stats.min_gap(), stats.max_gap()) {
-            (Some(min), Some(max)) => format!("{min} 抽 / {max} 抽"),
-            _ => "-".to_string(),
-        },
     );
     out.push('\n');
 
@@ -225,44 +207,7 @@ fn render(input: &RenderInput<'_>) -> String {
             &format!("{:.1}", gacha::theory::CORAL_PER_PULL * 100.0),
         ),
     );
-    row(
-        &mut out,
-        "可兑换限定抽数",
-        format!(
-            "{} 抽   ({} ÷ {}，向下取整)",
-            stats.exchangeable_pulls(),
-            stats.coral,
-            gacha::CORAL_PER_PULL_EXCHANGE
-        ),
-    );
     out.push('\n');
-
-    // ── 明细 ───────────────────────────────────────────────
-    if input.show_detail {
-        out.push_str(&p.cyan(&rule("明细")));
-        out.push('\n');
-        if stats.details.is_empty() {
-            out.push_str("（本次没有 5★ 或 4★ 产出）\n");
-        } else {
-            for d in &stats.details {
-                let note = match d.item {
-                    Item::Limited5 if d.used_guarantee => "   (歪后大保底)",
-                    Item::Limited5 => "   (50/50 成功)",
-                    Item::Standard5 => "   (50/50 失败 → 下次必限定)",
-                    Item::Four | Item::Three => "",
-                };
-                out.push_str(&format!(
-                    "#{:<3}第 {:>4} 抽   {} {:<4}大珊瑚{}\n",
-                    d.seq,
-                    d.pull_index,
-                    pad_display(d.item.rarity_label(), 10),
-                    format!("+{}", d.item.coral()),
-                    note
-                ));
-            }
-        }
-        out.push('\n');
-    }
 
     // ── 结束状态 ───────────────────────────────────────────
     out.push_str(&p.cyan(&rule("结束状态")));
@@ -339,8 +284,41 @@ fn render(input: &RenderInput<'_>) -> String {
     row(
         &mut out,
         "期望大珊瑚",
-        format!("{:.1}   实际 {}", gacha::theory::CORAL_PER_PULL * n, stats.coral),
+        format!(
+            "{:.1}   实际 {}",
+            gacha::theory::CORAL_PER_PULL * n,
+            stats.coral
+        ),
     );
+    out.push('\n');
+
+    // ── 明细 ───────────────────────────────────────────────
+    //
+    // 刻意放在最后：明细可能很长（最多 200 行），放前面会把汇总挤下去。
+    if input.show_detail {
+        out.push_str(&p.cyan(&rule("明细")));
+        out.push('\n');
+        if stats.details.is_empty() {
+            out.push_str("（本次没有 5★ 或 4★ 产出）\n");
+        } else {
+            for d in &stats.details {
+                let note = match d.item {
+                    Item::Limited5 if d.used_guarantee => "   (歪后大保底)",
+                    Item::Limited5 => "   (50/50 成功)",
+                    Item::Standard5 => "   (50/50 失败 → 下次必限定)",
+                    Item::Four | Item::Three => "",
+                };
+                out.push_str(&format!(
+                    "#{:<3}第 {:>4} 抽   {} {:<4}大珊瑚{}\n",
+                    d.seq,
+                    d.pull_index,
+                    pad_display(d.item.rarity_label(), 10),
+                    format!("+{}", d.item.coral()),
+                    note
+                ));
+            }
+        }
+    }
 
     out
 }

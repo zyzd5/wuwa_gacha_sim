@@ -34,7 +34,39 @@ fn zero_pulls_succeeds_and_prints_dashes() {
     // 除数为 0 时必须是 '-'，不能出现 NaN / inf。
     assert!(!out.stdout.contains("NaN"), "输出里出现了 NaN");
     assert!(!out.stdout.contains("inf"), "输出里出现了 inf");
-    assert!(out.stdout.contains("可兑换限定抽数"), "缺少大珊瑚明细");
+    assert!(out.stdout.contains("大珊瑚（余波珊瑚）明细"), "缺少大珊瑚明细");
+}
+
+#[test]
+fn detail_section_is_printed_last() {
+    let out = run(&["-n", "200", "--seed", "42", "--no-color"]);
+    let detail = out.stdout.find("── 明细 ").expect("应打印明细");
+    for earlier in [
+        "── 汇总 ",
+        "大珊瑚（余波珊瑚）明细",
+        "── 结束状态 ",
+        "── 与理论值对比 ",
+    ] {
+        let pos = out
+            .stdout
+            .find(earlier)
+            .unwrap_or_else(|| panic!("缺少 {earlier}"));
+        assert!(pos < detail, "{earlier} 应排在明细之前");
+    }
+}
+
+#[test]
+fn removed_rows_are_gone() {
+    let out = run(&["-n", "200", "--seed", "42", "--no-color"]);
+    // 「歪(50/50 失败)」与「常驻 5★(歪)」恒为同一个数，只保留后者。
+    assert!(!out.stdout.contains("50/50 失败) :"), "冗余的歪行应已删除");
+    // 3★ 武器是无用的抽卡副产物，不再展示。
+    assert!(!out.stdout.contains("3★ 武器"), "3★ 武器行应已删除");
+    assert!(!out.stdout.contains("最欧"), "最欧/最非行应已删除");
+    assert!(
+        !out.stdout.contains("可兑换限定抽数"),
+        "可兑换限定抽数行应已删除"
+    );
 }
 
 #[test]
